@@ -83,7 +83,7 @@ void CUAdditor::Run2()
 
 void CUAdditor::Run3()
 {
-    int size = 400;
+    int size = 25;
 
     int** matt = new int* [size];
     int** matt_a = new int* [size];

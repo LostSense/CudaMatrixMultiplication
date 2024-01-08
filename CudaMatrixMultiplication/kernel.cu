@@ -21,28 +21,13 @@ __global__ void TwoDAddKernel(int** c, int** a, int** b)
     c[x][y] = a[x][y] + b[x][y];
 }
 
-__global__ void TwoDAddKernel2(int** c, int** a, int** b)
+void AllocateCudaMemory2D(cudaError_t& err, int**& dev_c, int size, int**& dev_a, int**& dev_b, 
+                    int** temp, int** matt_a, int** temp2, int** matt_b, int** temp3, int** matt)
 {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    c[x][y] = a[x][y] + b[x][y];
-}
-
-void TwoDAddWithCuda(int **matt, int** matt_a, int** matt_b, int size)
-{
-    int** dev_c = nullptr;
-    int** dev_a = nullptr;
-    int** dev_b = nullptr;
-
-    cudaError_t err = cudaSetDevice(0);
-
     err = cudaMalloc((void**)&dev_c, size * sizeof(int*));
     err = cudaMalloc((void**)&dev_a, size * sizeof(int*));
     err = cudaMalloc((void**)&dev_b, size * sizeof(int*));
 
-    int** temp = new int*[size];
-    int** temp2 = new int*[size];
-    int** temp3 = new int*[size];
 
     for (int i = 0; i < size; ++i)
     {
@@ -57,6 +42,20 @@ void TwoDAddWithCuda(int **matt, int** matt_a, int** matt_b, int size)
     err = cudaMemcpy(dev_a, temp, size * sizeof(int*), cudaMemcpyHostToDevice);
     err = cudaMemcpy(dev_b, temp2, size * sizeof(int*), cudaMemcpyHostToDevice);
     err = cudaMemcpy(dev_c, temp3, size * sizeof(int*), cudaMemcpyHostToDevice);
+}
+
+void TwoDAddWithCuda(int **matt, int** matt_a, int** matt_b, int size)
+{
+    int** dev_c = nullptr;
+    int** dev_a = nullptr;
+    int** dev_b = nullptr;
+
+    cudaError_t err = cudaSetDevice(0);
+    int** temp = new int*[size];
+    int** temp2 = new int*[size];
+    int** temp3 = new int*[size];
+
+    AllocateCudaMemory2D(err, dev_c, size, dev_a, dev_b, temp, matt_a, temp2, matt_b, temp3, matt);
 
     dim3 tpb(size, size);
     TwoDAddKernel<<<1, tpb >>> (dev_c, dev_a, dev_b);
@@ -76,6 +75,15 @@ void TwoDAddWithCuda(int **matt, int** matt_a, int** matt_b, int size)
     cudaFree(dev_c);
 }
 
+__global__ void TwoDAddKernel2(int** c, int** a, int** b, int size)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x < size && y < size)
+        c[x][y] = a[x][y] + b[x][y];
+}
+
+
 void TwoDAddWithCuda2(int **matt, int** matt_a, int** matt_b, int size)
 {
     int** dev_c = nullptr;
@@ -83,32 +91,17 @@ void TwoDAddWithCuda2(int **matt, int** matt_a, int** matt_b, int size)
     int** dev_b = nullptr;
 
     cudaError_t err = cudaSetDevice(0);
-
-    err = cudaMalloc((void**)&dev_c, size * sizeof(int*));
-    err = cudaMalloc((void**)&dev_a, size * sizeof(int*));
-    err = cudaMalloc((void**)&dev_b, size * sizeof(int*));
-
     int** temp = new int*[size];
     int** temp2 = new int*[size];
     int** temp3 = new int*[size];
 
-    for (int i = 0; i < size; ++i)
-    {
-        err = cudaMalloc((void**)&(temp[i]), size * sizeof(int));
-        err = cudaMemcpy(temp[i], matt_a[i], size * sizeof(int), cudaMemcpyHostToDevice);
-        err = cudaMalloc((void**)&(temp2[i]), size * sizeof(int));
-        err = cudaMemcpy(temp2[i], matt_b[i], size * sizeof(int), cudaMemcpyHostToDevice);
-        err = cudaMalloc((void**)&(temp3[i]), size * sizeof(int));
-        err = cudaMemcpy(temp3[i], matt[i], size * sizeof(int), cudaMemcpyHostToDevice);
-    }
-
-    err = cudaMemcpy(dev_a, temp, size * sizeof(int*), cudaMemcpyHostToDevice);
-    err = cudaMemcpy(dev_b, temp2, size * sizeof(int*), cudaMemcpyHostToDevice);
-    err = cudaMemcpy(dev_c, temp3, size * sizeof(int*), cudaMemcpyHostToDevice);
+    AllocateCudaMemory2D(err, dev_c, size, dev_a, dev_b, temp, matt_a, temp2, matt_b, temp3, matt);
 
     dim3 tpb(16, 16);
-    dim3 blocks(size/16, size/16);
-    TwoDAddKernel2<<<blocks, tpb>>> (dev_c, dev_a, dev_b);
+    int blockNum = size / 16;
+    blockNum = size % 16 == 0 ? blockNum : blockNum + 1;
+    dim3 blocks(blockNum, blockNum);
+    TwoDAddKernel2<<<blocks, tpb>>> (dev_c, dev_a, dev_b, size);
     err = cudaGetLastError();
     err = cudaDeviceSynchronize();
 
