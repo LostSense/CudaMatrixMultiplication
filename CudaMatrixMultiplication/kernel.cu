@@ -21,6 +21,13 @@ __global__ void TwoDAddKernel(int** c, int** a, int** b)
     c[x][y] = a[x][y] + b[x][y];
 }
 
+__global__ void TwoDAddKernel2(int** c, int** a, int** b)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    c[x][y] = a[x][y] + b[x][y];
+}
+
 void TwoDAddWithCuda(int **matt, int** matt_a, int** matt_b, int size)
 {
     int** dev_c = nullptr;
@@ -99,8 +106,9 @@ void TwoDAddWithCuda2(int **matt, int** matt_a, int** matt_b, int size)
     err = cudaMemcpy(dev_b, temp2, size * sizeof(int*), cudaMemcpyHostToDevice);
     err = cudaMemcpy(dev_c, temp3, size * sizeof(int*), cudaMemcpyHostToDevice);
 
-    dim3 tpb(size, size);
-    TwoDAddKernel<<<1, tpb >>> (dev_c, dev_a, dev_b);
+    dim3 tpb(16, 16);
+    dim3 blocks(size/16, size/16);
+    TwoDAddKernel2<<<blocks, tpb>>> (dev_c, dev_a, dev_b);
     err = cudaGetLastError();
     err = cudaDeviceSynchronize();
 

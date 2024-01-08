@@ -7,6 +7,7 @@ int main(int argc, char** argv)
 	CUAdditor obj;
 	obj.Run();
 	obj.Run2();
+	obj.Run3();
 
 	return 0;
 }
