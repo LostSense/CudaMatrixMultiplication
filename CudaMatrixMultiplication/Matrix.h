@@ -24,7 +24,63 @@ namespace NS_Matrix
 		UNSEQUENCED_POLICY
 	};
 
-	template<DeviceType T, std::size_t X, std::size_t Y>
+	template <typename T>
+	class DeviceMemoryAllocator
+	{
+	public:
+		DeviceMemoryAllocator(size_t size) : m_ptr(Init(size)) 
+		{
+			//free
+		}
+		~DeviceMemoryAllocator()
+		{
+			cudaFree(m_ptr);
+		}
+
+		T* GetPtr()
+		{
+			return m_ptr;
+		}
+
+		operator T* () const
+		{
+			return m_ptr;
+		}
+		
+		operator const T* () const
+		{
+			return m_ptr;
+		}
+		
+		operator void* () const
+		{
+			return m_ptr;
+		}
+		
+		operator const void* () const
+		{
+			return m_ptr;
+		}
+		
+		const T* GetPtr() const
+		{
+			return m_ptr;
+		}
+	private:
+		T* m_ptr;
+
+		T* Init(size_t size)
+		{
+			T* temp;
+			cudaError_t err = cudaMalloc(&temp, size * sizeof(T));
+			if (err != cudaSuccess)
+				exception("Can't allocate memory!");
+
+			return temp;
+		}
+	};
+
+	template<DeviceType T, size_t X, size_t Y>
 	class Matrix;
 
 	template<size_t X, size_t Y>
@@ -39,13 +95,16 @@ namespace NS_Matrix
 		Matrix(const Matrix<DeviceType::GPU, X, Y>&& other);
 		const Matrix<DeviceType::CPU, X, Y>& operator=(const Matrix<DeviceType::CPU, X, Y>& other) noexcept;
 		const Matrix<DeviceType::CPU, X, Y>& operator=(const Matrix<DeviceType::GPU, X, Y>& other);
-		const Matrix<DeviceType::CPU, X, Y>& operator=(std::shared_ptr<Matrix<DeviceType::CPU, X, Y>> other);
 		const Matrix<DeviceType::CPU, X, Y>& operator=(const Matrix<DeviceType::CPU, X, Y>&& other) noexcept;
 		const Matrix<DeviceType::CPU, X, Y>& operator=(const Matrix<DeviceType::GPU, X, Y>&& other);
 		const Matrix<DeviceType::CPU, X, Y> operator+=(const Matrix<DeviceType::CPU, X, Y>& other) noexcept;
 		const Matrix<DeviceType::CPU, X, Y> operator+=(const Matrix<DeviceType::GPU, X, Y>& other);
 		const Matrix<DeviceType::CPU, X, Y> operator+(const Matrix<DeviceType::CPU, X, Y>& other);
 		const Matrix<DeviceType::CPU, X, Y> operator+(const Matrix<DeviceType::GPU, X, Y>& other);
+		template<size_t Z>
+		const Matrix<DeviceType::CPU, X, Y> operator*(const Matrix<DeviceType::CPU, Y, Z>& other);
+		template<size_t Z>
+		const Matrix<DeviceType::CPU, X, Y> operator*(const Matrix<DeviceType::GPU, Y, Z>& other);
 		double* GetCArr() noexcept;
 		const double* GetConstCArr() const noexcept;
 		void SetExecutionPolicy(MatrixExecutionPolicy pol);
@@ -60,10 +119,21 @@ namespace NS_Matrix
 		void Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other, Args ...args);
 		void Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other);
 		void Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other);
+
+		template<typename ...Args>
+		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other, Args ...args);
+		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other);
+		template<typename ...Args>
+		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other, Args ...args);
+		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other);
 	private:
 		void InnerCopy(const Matrix<DeviceType::CPU, X, Y>* other);
 		void InnerAdd(const Matrix<DeviceType::CPU, X, Y>* other);
 		void InnerAddFromGPU(const Matrix<DeviceType::GPU, X, Y>* other);
+		template<size_t Z>
+		void InnerMultiply(const Matrix<DeviceType::CPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Y>* out);
+		template<size_t Z>
+		void InnerMultiplyFromGPU(const Matrix<DeviceType::GPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Y>* out);
 
 		
 		double arr[X * Y];
@@ -91,6 +161,8 @@ namespace NS_Matrix
 		const Matrix<DeviceType::GPU, X, Y> operator+=(const Matrix<DeviceType::GPU, X, Y>& other);
 		const Matrix<DeviceType::GPU, X, Y> operator+(const Matrix<DeviceType::CPU, X, Y>& other);
 		const Matrix<DeviceType::GPU, X, Y> operator+(const Matrix<DeviceType::GPU, X, Y>& other);
+		const Matrix<DeviceType::GPU, X, Y> operator*(const Matrix<DeviceType::CPU, X, Y>& other);
+		const Matrix<DeviceType::GPU, X, Y> operator*(const Matrix<DeviceType::GPU, X, Y>& other);
 		double* GetCArr() noexcept;
 		const double* GetConstCArr() const noexcept;
 		ProxyCell operator() (size_t row, size_t col); //rework it. we can't do assigment to double, use proxy.
@@ -106,7 +178,7 @@ namespace NS_Matrix
 		double* Init();
 
 		
-		double* arr;
+		DeviceMemoryAllocator<double> arr;
 
 		class ProxyCell
 		{
@@ -126,9 +198,9 @@ namespace NS_Matrix
 	//****************************************************************************************************************
 
 	template<size_t X, size_t Y>
-	inline Matrix<DeviceType::GPU, X, Y>::Matrix() : arr(Init())
+	inline Matrix<DeviceType::GPU, X, Y>::Matrix() : arr(X * Y)
 	{
-		cudaError_t error = cudaMemset(arr, 0, X * Y * sizeof(double));
+		cudaError_t error = cudaMemset(arr.GetPtr(), 0, X * Y * sizeof(double));
 
 		if (error != cudaSuccess)
 			throw std::exception("Can't reset matrix.");
@@ -141,15 +213,15 @@ namespace NS_Matrix
 	}
 
 	template<size_t X, size_t Y>
-	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>& other) : arr(Init())
+	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>& other) : arr(X * Y)
 	{
-		cudaError_t error = cudaMemcpy(arr, other.GetConstCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
+		cudaError_t error = cudaMemcpy(arr.GetPtr(), other.GetConstCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
 		if (error != cudaSuccess)
 			throw std::exception("Can't copy from device matrix to host matrix.");
 	}
 	
 	template<size_t X, size_t Y>
-	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::GPU, X, Y>& other) : arr(Init())
+	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::GPU, X, Y>& other) : arr(X * Y)
 	{
 		cudaError_t error = CopyMatrix(arr, other.arr, X * Y);
 		if (error != cudaSuccess)
@@ -157,9 +229,9 @@ namespace NS_Matrix
 	}
 
 	template<size_t X, size_t Y>
-	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>&& other) : arr(Init())
+	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>&& other) : arr(X * Y)
 	{
-		cudaError_t error = cudaMemcpy(arr, other.GetCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
+		cudaError_t error = cudaMemcpy(arr.GetPtr(), other.GetCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
 		if (error != cudaSuccess)
 			throw std::exception("Can't copy from device matrix to host matrix.");
 	}
@@ -167,8 +239,8 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::GPU, X, Y>&& other)
 	{
-		arr = other.arr;
-		other.arr = nullptr;
+		arr.GetPtr() = other.arr.GetPtr();
+		other.arr.GetPtr() = nullptr;
 
 		return *this;
 	}
@@ -185,7 +257,7 @@ namespace NS_Matrix
 		return arr;
 	}
 
-	template<size_t X, size_t Y>
+	/*template<size_t X, size_t Y>
 	inline double* Matrix<DeviceType::GPU, X, Y>::Init()
 	{
 		double* ptr = nullptr;
@@ -194,7 +266,7 @@ namespace NS_Matrix
 			throw std::exception("Can't allocate memory in device.");
 
 		return ptr;
-	}
+	}*/
 
 	template<size_t X, size_t Y>
 	inline const Matrix<DeviceType::GPU, X, Y>& Matrix<DeviceType::GPU, X, Y>::operator=(const Matrix<DeviceType::CPU, X, Y>& other)
@@ -209,6 +281,7 @@ namespace NS_Matrix
 	inline const Matrix<DeviceType::GPU, X, Y>& Matrix<DeviceType::GPU, X, Y>::operator=(const Matrix<DeviceType::GPU, X, Y>& other)
 	{
 		cudaError_t error = CopyMatrix(arr, other.arr, X * Y);
+		error = CopyMatrix(arr, other.arr, X * Y);
 		if (error != cudaSuccess)
 			throw std::exception("Can't copy from device matrix to host matrix.");
 		return *this;
@@ -217,7 +290,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline const Matrix<DeviceType::GPU, X, Y>& Matrix<DeviceType::GPU, X, Y>::operator=(const Matrix<DeviceType::CPU, X, Y>&& other)
 	{
-		cudaError_t error = cudaMemcpy(this->arr, other.GetConstCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
+		cudaError_t error = cudaMemcpy(this->arr.GetPtr(), other.GetConstCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
 		if (error != cudaSuccess)
 			throw std::exception("Can't copy from Host matrix to Device matrix.");
 		return *this;
@@ -226,13 +299,13 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline const Matrix<DeviceType::GPU, X, Y>& Matrix<DeviceType::GPU, X, Y>::operator=(Matrix<DeviceType::GPU, X, Y>&& other)
 	{
-		cudaError_t error = cudaFree(arr);
+		cudaError_t error = cudaFree(arr.GetPtr());
 
 		if (error != cudaSuccess)
 			throw std::exception("Can't free allocated memory.");
 
-		arr = other.arr;
-		other.arr = nullptr;
+		arr.GetPtr() = other.arr.GetPtr();
+		other.arr.GetPtr() = nullptr;
 
 		return *this;
 	}
@@ -240,21 +313,15 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline const Matrix<DeviceType::GPU, X, Y> Matrix<DeviceType::GPU, X, Y>::operator+=(const Matrix<DeviceType::CPU, X, Y>& other)
 	{
-		double* tempMem;
+		DeviceMemoryAllocator<double> tempMem(X * Y);
 
-		//1 - allocate memory
-		cudaError_t err = cudaMalloc(&tempMem, X * Y * sizeof(double));
-		if (err != cudaSuccess)
-			throw std::exception("Can't allocate memory on device!");
-		//2 - copy all array to device
-		err = cudaMemcpy(tempMem, other.arr, X * Y * sizeof(double), cudaMemcpyHostToDevice);
+		//1 - copy all array to device
+		cudaError_t err = cudaMemcpy(tempMem.GetPtr(), other.arr, X * Y * sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess)
 			throw std::exception("Can't copy data!");
-		//3 - call to the function add matrix.
+		//2 - call to the function add matrix.
 		if (AddMatrix(arr, tempMem, X * Y) != cudaSuccess)
 			throw std::exception("Can't make matrix addiction!");
-
-		cudaFree(tempMem);
 
 		return *this;
 	}
@@ -262,7 +329,6 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline const Matrix<DeviceType::GPU, X, Y> Matrix<DeviceType::GPU, X, Y>::operator+=(const Matrix<DeviceType::GPU, X, Y>& other)
 	{
-		//3 - call to the function add matrix.
 		if (AddMatrix(arr, other.arr, X * Y) != cudaSuccess)
 			throw std::exception("Can't make matrix addiction!");
 
@@ -298,7 +364,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline const Matrix<DeviceType::GPU, X, Y>::ProxyCell& Matrix<DeviceType::GPU, X, Y>::ProxyCell::operator=(double value)
 	{
-		cudaError_t err = SetValue(m_hostMat.arr + X * m_row + m_column, value);
+		cudaError_t err = SetValue(m_hostMat.arr.GetPtr() + X * m_row + m_column, value);
 		if (err != cudaSuccess)
 			throw std::exception("Can't assign value!");
 		return *this;
@@ -319,21 +385,14 @@ namespace NS_Matrix
 	template<typename ...Args>
 	void Matrix<DeviceType::GPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other, Args ...args)
 	{
-		double* tempMem;
+		DeviceMemoryAllocator<double> tempMem(X * Y);
 
-		//1 - allocate memory
-		cudaError_t err = cudaMalloc(&tempMem, X * Y * sizeof(double));
-		if (err != cudaSuccess)
-			throw std::exception("Can't allocate memory on device!");
-		//2 - copy all array to device
-		err = cudaMemcpy(tempMem, other.arr, X * Y * sizeof(double), cudaMemcpyHostToDevice);
+		cudaError_t err = cudaMemcpy(tempMem.GetPtr(), other.arr, X * Y * sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess)
 			throw std::exception("Can't copy data!");
 		//3 - call to the function add matrix.
 		if (AddMatrix(arr, tempMem, X * Y) != cudaSuccess)
 			throw std::exception("Can't make matrix addiction!");
-
-		cudaFree(tempMem);
 
 		Add(args...);
 	}
@@ -594,5 +653,42 @@ namespace NS_Matrix
 	void Matrix<DeviceType::CPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other)
 	{
 		InnerAddFromGPU(other).get();
+	}
+
+	template<size_t X, size_t Y>
+	template<size_t Z>
+	void Matrix<DeviceType::CPU, X, Y>::InnerMultiply(const Matrix<DeviceType::CPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Y>* out)
+	{
+		auto multiplyLambda = [&](double& el)
+			{
+				size_t row = (out->GetCArr() - &el) / Y;
+				size_t column = (out->GetCArr() - &el) / sizeof(double);
+
+				for (int i = 0; i < Z; ++i)
+					for (int j = 0; j < Y; ++j)
+					{
+						out->GetCArr()[row * Z + column] += arr[row * Y + j] * (other->GetConstCArr()[j * Z + i]);
+					}
+			};
+
+		switch (m_policy)
+		{
+		case MatrixExecutionPolicy::SEQUENCED_POLICY:				for_each_n(execution::seq, begin(out->GetCArr()), X * Y, multiplyLambda); break;
+		case MatrixExecutionPolicy::PARALLEL_POLICY:				for_each_n(execution::par, begin(out->GetCArr()), X * Y, multiplyLambda); break;
+		case MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY:	for_each_n(execution::par_unseq, begin(out->GetCArr()), X * Y, multiplyLambda); break;
+		case MatrixExecutionPolicy::UNSEQUENCED_POLICY:				for_each_n(execution::unseq, begin(out->GetCArr()), X * Y, multiplyLambda); break;
+		default:													for_each_n(execution::seq, begin(out->GetCArr()), X * Y, multiplyLambda); break;
+		}
+	}
+
+	template<size_t X, size_t Y>
+	template<size_t Z>
+	void Matrix<DeviceType::CPU, X, Y>::InnerMultiplyFromGPU(const Matrix<DeviceType::GPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Y>* out)
+	{
+		//Allocate memory on device
+		//Move data to device
+		//Multiply
+		//move data to OUT
+		//free alocated memory on device.
 	}
 }
