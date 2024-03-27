@@ -9,7 +9,8 @@ int main(int argc, char** argv)
 	obj.Run2();
 	obj.Run3();*/
 	obj.RunMatrixTests1();
-	obj.RunMatrixTests2();
+	//obj.RunMatrixTests2();
+	obj.RunMatrixTests3();
 
 	return 0;
 }

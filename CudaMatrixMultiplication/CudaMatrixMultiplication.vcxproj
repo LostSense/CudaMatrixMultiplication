@@ -86,12 +86,14 @@
   <ItemGroup>
     <ClCompile Include="CUAdditor.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="Timer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CUAdditor.h" />
     <ClInclude Include="kernel.h" />
     <ClInclude Include="Matrix.h" />
     <ClInclude Include="MatrixKer.h" />
+    <ClInclude Include="Timer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

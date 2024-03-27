@@ -8,6 +8,8 @@
 
 namespace NS_Matrix
 {
+	using namespace std;
+
 	enum class DeviceType
 	{
 		CPU,
@@ -37,6 +39,7 @@ namespace NS_Matrix
 		Matrix(const Matrix<DeviceType::GPU, X, Y>&& other);
 		const Matrix<DeviceType::CPU, X, Y>& operator=(const Matrix<DeviceType::CPU, X, Y>& other) noexcept;
 		const Matrix<DeviceType::CPU, X, Y>& operator=(const Matrix<DeviceType::GPU, X, Y>& other);
+		const Matrix<DeviceType::CPU, X, Y>& operator=(std::shared_ptr<Matrix<DeviceType::CPU, X, Y>> other);
 		const Matrix<DeviceType::CPU, X, Y>& operator=(const Matrix<DeviceType::CPU, X, Y>&& other) noexcept;
 		const Matrix<DeviceType::CPU, X, Y>& operator=(const Matrix<DeviceType::GPU, X, Y>&& other);
 		const Matrix<DeviceType::CPU, X, Y> operator+=(const Matrix<DeviceType::CPU, X, Y>& other) noexcept;
@@ -47,7 +50,22 @@ namespace NS_Matrix
 		const double* GetConstCArr() const noexcept;
 		void SetExecutionPolicy(MatrixExecutionPolicy pol);
 		double& operator() (size_t row, size_t col);
+
+		//==================================================================================================================
+		// This section for matricies of size 10k +
+		//==================================================================================================================
+		template<typename ...Args>
+		void Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other, Args ...args);
+		template<typename ...Args>
+		void Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other, Args ...args);
+		void Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other);
+		void Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other);
 	private:
+		void InnerCopy(const Matrix<DeviceType::CPU, X, Y>* other);
+		void InnerAdd(const Matrix<DeviceType::CPU, X, Y>* other);
+		void InnerAddFromGPU(const Matrix<DeviceType::GPU, X, Y>* other);
+
+		
 		double arr[X * Y];
 		MatrixExecutionPolicy m_policy;
 
@@ -76,8 +94,18 @@ namespace NS_Matrix
 		double* GetCArr() noexcept;
 		const double* GetConstCArr() const noexcept;
 		ProxyCell operator() (size_t row, size_t col); //rework it. we can't do assigment to double, use proxy.
+		
+		
+		template<typename ...Args>
+		void Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other, Args ...args);
+		template<typename ...Args>
+		void Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other, Args ...args);
+		void Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other);
+		void Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other);
 	private:
 		double* Init();
+
+		
 		double* arr;
 
 		class ProxyCell
@@ -115,7 +143,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>& other) : arr(Init())
 	{
-		cudaError_t error = cudaMemcpy(arr, other.GetCArr(), X * Y * sizeof(double), cudaMemcpyDeviceToHost);
+		cudaError_t error = cudaMemcpy(arr, other.GetConstCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
 		if (error != cudaSuccess)
 			throw std::exception("Can't copy from device matrix to host matrix.");
 	}
@@ -131,7 +159,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>&& other) : arr(Init())
 	{
-		cudaError_t error = cudaMemcpy(arr, other.GetCArr(), X * Y * sizeof(double), cudaMemcpyDeviceToHost);
+		cudaError_t error = cudaMemcpy(arr, other.GetCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
 		if (error != cudaSuccess)
 			throw std::exception("Can't copy from device matrix to host matrix.");
 	}
@@ -287,6 +315,67 @@ namespace NS_Matrix
 		return val;
 	}
 
+	template<size_t X, size_t Y>
+	template<typename ...Args>
+	void Matrix<DeviceType::GPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other, Args ...args)
+	{
+		double* tempMem;
+
+		//1 - allocate memory
+		cudaError_t err = cudaMalloc(&tempMem, X * Y * sizeof(double));
+		if (err != cudaSuccess)
+			throw std::exception("Can't allocate memory on device!");
+		//2 - copy all array to device
+		err = cudaMemcpy(tempMem, other.arr, X * Y * sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess)
+			throw std::exception("Can't copy data!");
+		//3 - call to the function add matrix.
+		if (AddMatrix(arr, tempMem, X * Y) != cudaSuccess)
+			throw std::exception("Can't make matrix addiction!");
+
+		cudaFree(tempMem);
+
+		Add(args...);
+	}
+
+	template<size_t X, size_t Y>
+	template<typename ...Args>
+	void Matrix<DeviceType::GPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other, Args ...args)
+	{
+		if (AddMatrix(arr, other->GetCArr(), X * Y) != cudaSuccess)
+			throw std::exception("Can't make matrix addiction!");
+		
+
+		Add(args...);
+	}
+
+	template<size_t X, size_t Y>
+	void Matrix<DeviceType::GPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other)
+	{
+		double* tempMem;
+
+		//1 - allocate memory
+		cudaError_t err = cudaMalloc(&tempMem, X * Y * sizeof(double));
+		if (err != cudaSuccess)
+			throw std::exception("Can't allocate memory on device!");
+		//2 - copy all array to device
+		err = cudaMemcpy(tempMem, other.arr, X * Y * sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess)
+			throw std::exception("Can't copy data!");
+		//3 - call to the function add matrix.
+		if (AddMatrix(arr, tempMem, X * Y) != cudaSuccess)
+			throw std::exception("Can't make matrix addiction!");
+
+		cudaFree(tempMem);
+	}
+
+	template<size_t X, size_t Y>
+	void Matrix<DeviceType::GPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other)
+	{
+		if (AddMatrix(arr, other->GetCArr(), X * Y) != cudaSuccess)
+			throw std::exception("Can't make matrix addiction!");
+	}
+
 
 	//****************************************************************************************************************
 	// ----------------------------------------------CPU MATRIX IMPLEMENTATION----------------------------------------
@@ -295,21 +384,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline Matrix<DeviceType::CPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>& other) noexcept
 	{
-		using namespace std;
-
-		switch (m_policy)
-		{
-		case MatrixExecutionPolicy::SEQUENCED_POLICY: copy(execution::seq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		case MatrixExecutionPolicy::PARALLEL_POLICY: copy(execution::par, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		case MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY: copy(execution::par_unseq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		case MatrixExecutionPolicy::UNSEQUENCED_POLICY: copy(execution::unseq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		default: copy(execution::seq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		}
+		InnerCopy(&other);
 	}
 
 	template<size_t X, size_t Y>
@@ -330,21 +405,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline Matrix<DeviceType::CPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>&& other) noexcept
 	{
-		using namespace std;
-
-		switch (m_policy)
-		{
-		case MatrixExecutionPolicy::SEQUENCED_POLICY: copy(execution::seq, begin(other.arr), end(other.arr), &this->arr);
-			break;
-		case MatrixExecutionPolicy::PARALLEL_POLICY: copy(execution::par, begin(other.arr), end(other.arr), &this->arr);
-			break;
-		case MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY: copy(execution::par_unseq, begin(other.arr), end(other.arr), &this->arr);
-			break;
-		case MatrixExecutionPolicy::UNSEQUENCED_POLICY: copy(execution::unseq, begin(other.arr), end(other.arr), &this->arr);
-			break;
-		default: copy(execution::seq, begin(other.arr), end(other.arr), &this->arr);
-			break;
-		}
+		InnerCopy(other);
 	}
 
 	template<size_t X, size_t Y>
@@ -358,21 +419,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline const Matrix<DeviceType::CPU, X, Y>& Matrix<DeviceType::CPU, X, Y>::operator=(const Matrix<DeviceType::CPU, X, Y>& other) noexcept
 	{
-		using namespace std;
-
-		switch (m_policy)
-		{
-		case MatrixExecutionPolicy::SEQUENCED_POLICY: copy(execution::seq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		case MatrixExecutionPolicy::PARALLEL_POLICY: copy(execution::par, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		case MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY: copy(execution::par_unseq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		case MatrixExecutionPolicy::UNSEQUENCED_POLICY: copy(execution::unseq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		default: copy(execution::seq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		}
+		InnerCopy(&other);
 
 		return *this;
 	}
@@ -389,21 +436,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline const Matrix<DeviceType::CPU, X, Y>& Matrix<DeviceType::CPU, X, Y>::operator=(const Matrix<DeviceType::CPU, X, Y>&& other) noexcept
 	{
-		using namespace std;
-
-		switch (m_policy)
-		{
-		case MatrixExecutionPolicy::SEQUENCED_POLICY: copy(execution::seq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		case MatrixExecutionPolicy::PARALLEL_POLICY: copy(execution::par, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		case MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY: copy(execution::par_unseq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		case MatrixExecutionPolicy::UNSEQUENCED_POLICY: copy(execution::unseq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		default: copy(execution::seq, begin(other.arr), end(other.arr), begin(arr));
-			break;
-		}
+		InnerCopy(&other);
 
 		return *this;
 	}
@@ -436,29 +469,43 @@ namespace NS_Matrix
 	}
 
 	template<size_t X, size_t Y>
-	inline const Matrix<DeviceType::CPU, X, Y> Matrix<DeviceType::CPU, X, Y>::operator+=(const Matrix<DeviceType::CPU, X, Y>& other) noexcept
+	void Matrix<DeviceType::CPU, X, Y>::InnerCopy(const Matrix<DeviceType::CPU, X, Y>* other)
 	{
-		using namespace std;
-
 		switch (m_policy)
 		{
-		case MatrixExecutionPolicy::SEQUENCED_POLICY: transform(execution::seq, begin(arr), end(arr), begin(other.arr), begin(arr), [&](double a, double b) { return a + b; });
+		case MatrixExecutionPolicy::SEQUENCED_POLICY: copy(execution::seq, begin(other->arr), end(other->arr), begin(arr));
 			break;
-		case MatrixExecutionPolicy::PARALLEL_POLICY: transform(execution::par, begin(arr), end(arr), begin(other.arr), begin(arr), [&](double a, double b) { return a + b; });
+		case MatrixExecutionPolicy::PARALLEL_POLICY: copy(execution::par, begin(other->arr), end(other->arr), begin(arr));
 			break;
-		case MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY: transform(execution::par_unseq, begin(arr), end(arr), begin(other.arr), begin(arr), [&](double a, double b) { return a + b; });
+		case MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY: copy(execution::par_unseq, begin(other->arr), end(other->arr), begin(arr));
 			break;
-		case MatrixExecutionPolicy::UNSEQUENCED_POLICY: transform(execution::unseq, begin(arr), end(arr), begin(other.arr), begin(arr), [&](double a, double b) { return a + b; });
+		case MatrixExecutionPolicy::UNSEQUENCED_POLICY: copy(execution::unseq, begin(other->arr), end(other->arr), begin(arr));
 			break;
-		default: transform(execution::seq, begin(arr), end(arr), begin(other.arr), begin(arr), [&](double a, double b) { return a + b; });
+		default: copy(execution::seq, begin(other->arr), end(other->arr), begin(arr));
 			break;
 		}
-
-		return *this;
 	}
 
 	template<size_t X, size_t Y>
-	inline const Matrix<DeviceType::CPU, X, Y> Matrix<DeviceType::CPU, X, Y>::operator+=(const Matrix<DeviceType::GPU, X, Y>& other)
+	void Matrix<DeviceType::CPU, X, Y>::InnerAdd(const Matrix<DeviceType::CPU, X, Y>* other)
+	{
+		switch (m_policy)
+		{
+		case MatrixExecutionPolicy::SEQUENCED_POLICY: transform(execution::seq, begin(arr), end(arr), begin(other->arr), begin(arr), [&](double a, double b) { return a + b; });
+			break;
+		case MatrixExecutionPolicy::PARALLEL_POLICY: transform(execution::par, begin(arr), end(arr), begin(other->arr), begin(arr), [&](double a, double b) { return a + b; });
+			break;
+		case MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY: transform(execution::par_unseq, begin(arr), end(arr), begin(other->arr), begin(arr), [&](double a, double b) { return a + b; });
+			break;
+		case MatrixExecutionPolicy::UNSEQUENCED_POLICY: transform(execution::unseq, begin(arr), end(arr), begin(other->arr), begin(arr), [&](double a, double b) { return a + b; });
+			break;
+		default: transform(execution::seq, begin(arr), end(arr), begin(other->arr), begin(arr), [&](double a, double b) { return a + b; });
+			break;
+		}
+	}
+	
+	template<size_t X, size_t Y>
+	void Matrix<DeviceType::CPU, X, Y>::InnerAddFromGPU(const Matrix<DeviceType::GPU, X, Y>* other)
 	{
 		double* tempMem;
 
@@ -471,7 +518,7 @@ namespace NS_Matrix
 		if (err != cudaSuccess)
 			throw std::exception("Can't copy data!");
 		//3 - call to the function add matrix.
-		if (AddMatrix(tempMem, other.GetConstCArr(), X * Y) != cudaSuccess)
+		if (AddMatrix(tempMem, other->GetConstCArr(), X * Y) != cudaSuccess)
 			throw std::exception("Can't make matrix addiction!");
 
 		//4 - copy back to the given array.
@@ -480,6 +527,20 @@ namespace NS_Matrix
 			throw std::exception("Can't copy data!");
 
 		cudaFree(tempMem);
+	}
+
+	template<size_t X, size_t Y>
+	inline const Matrix<DeviceType::CPU, X, Y> Matrix<DeviceType::CPU, X, Y>::operator+=(const Matrix<DeviceType::CPU, X, Y>& other) noexcept
+	{
+		InnerAdd(&other);
+
+		return *this;
+	}
+
+	template<size_t X, size_t Y>
+	inline const Matrix<DeviceType::CPU, X, Y> Matrix<DeviceType::CPU, X, Y>::operator+=(const Matrix<DeviceType::GPU, X, Y>& other)
+	{
+		InnerAddFromGPU(&other);
 
 		return *this;
 	}
@@ -504,5 +565,34 @@ namespace NS_Matrix
 	inline double& Matrix<DeviceType::CPU, X, Y>::operator() (size_t row, size_t col)
 	{
 		return arr[row * X + col];
+	}
+
+	template<size_t X, size_t Y>
+	template<typename ...Args>
+	void Matrix<DeviceType::CPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other, Args ...args)
+	{
+		InnerAdd(other.get());
+		Add(args...);
+	}
+
+	template<size_t X, size_t Y>
+	template<typename ...Args>
+	void Matrix<DeviceType::CPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other, Args ...args)
+	{
+		InnerAddFromGPU(other.get());
+
+		Add(args...);
+	}
+
+	template<size_t X, size_t Y>
+	void Matrix<DeviceType::CPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other)
+	{
+		InnerAdd(other.get());
+	}
+
+	template<size_t X, size_t Y>
+	void Matrix<DeviceType::CPU, X, Y>::Add(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other)
+	{
+		InnerAddFromGPU(other).get();
 	}
 }

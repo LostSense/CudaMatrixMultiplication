@@ -9,5 +9,7 @@ public:
 	void Run3();
 	void RunMatrixTests1();
 	void RunMatrixTests2();
+	void RunMatrixTests3();
+	void RunMatrixTests4();
 };
 

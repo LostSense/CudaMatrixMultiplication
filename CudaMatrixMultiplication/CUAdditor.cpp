@@ -4,6 +4,8 @@
 #include <memory>
 
 #include "Matrix.h"
+#include "Timer.h"
+
 using namespace NS_Matrix;
 void PrintMatrix(double* arr, size_t row, size_t col);
 void PrintCudaMatrix(double* arr, size_t row, size_t col);
@@ -157,14 +159,14 @@ void CUAdditor::RunMatrixTests2()
             (*cMat)(i, j) = i * j;
             (*cMat2)(i, j) = i + j;
         }
-    std::cout << "Print cMat1\n";
+   /* std::cout << "Print cMat1\n";
     PrintMatrix(cMat->GetCArr(), 100, 100);
     std::cout << "Print cMat2\n";
-    PrintMatrix(cMat2->GetCArr(), 100, 100);
+    PrintMatrix(cMat2->GetCArr(), 100, 100);*/
 
     *cMat3 = *cMat + *cMat2;
-    std::cout << "Print cMat3\n";
-    PrintMatrix(cMat3->GetCArr(), 100, 100);
+    /*std::cout << "Print cMat3\n";
+    PrintMatrix(cMat3->GetCArr(), 100, 100);*/
     
     std::shared_ptr<Matrix<DeviceType::GPU, 100, 100>> gMat = std::make_shared<Matrix<DeviceType::GPU, 100, 100>>();
     std::shared_ptr<Matrix<DeviceType::GPU, 100, 100>> gMat2 = std::make_shared<Matrix<DeviceType::GPU, 100, 100>>();
@@ -176,17 +178,103 @@ void CUAdditor::RunMatrixTests2()
             (*gMat)(i, j) = i * j;
             (*gMat2)(i, j) = i + j;
         }
-    PrintCudaMatrix(gMat->GetCArr(), 100, 100);
-    PrintCudaMatrix(gMat2->GetCArr(), 100, 100);
+    //PrintCudaMatrix(gMat->GetCArr(), 100, 100);
+    //PrintCudaMatrix(gMat2->GetCArr(), 100, 100);
 
     *gMat3 = *gMat + *gMat2;
-    PrintCudaMatrix(gMat3->GetCArr(), 100, 100);
+    //PrintCudaMatrix(gMat3->GetCArr(), 100, 100);
 
     *cMat3 = *cMat3 + *gMat3;
-    PrintMatrix(cMat3->GetCArr(), 100, 100);
+    //PrintMatrix(cMat3->GetCArr(), 100, 100);
 
     *gMat3 = *cMat3 + *gMat3;
-    PrintCudaMatrix(gMat3->GetCArr(), 100, 100);
+    //PrintCudaMatrix(gMat3->GetCArr(), 100, 100);
+}
+
+void CUAdditor::RunMatrixTests3()
+{
+    std::shared_ptr<Matrix<DeviceType::CPU, 10000, 10000>> cMat = std::make_shared<Matrix<DeviceType::CPU, 10000, 10000 >>();
+    std::shared_ptr<Matrix<DeviceType::CPU, 10000, 10000>> cMat2 = std::make_shared<Matrix<DeviceType::CPU, 10000, 10000 >>();
+    std::shared_ptr<Matrix<DeviceType::CPU, 10000, 10000>> cMat3 = std::make_shared<Matrix<DeviceType::CPU, 10000, 10000 >>();
+    cMat->SetExecutionPolicy(NS_Matrix::MatrixExecutionPolicy::SEQUENCED_POLICY);
+    cMat2->SetExecutionPolicy(NS_Matrix::MatrixExecutionPolicy::SEQUENCED_POLICY);
+    cMat3->SetExecutionPolicy(NS_Matrix::MatrixExecutionPolicy::SEQUENCED_POLICY);
+
+    for (int i = 0; i < 10000; ++i)
+        for (int j = 0; j < 10000; ++j)
+        {
+            (*cMat)(i, j) = i * j;
+            (*cMat2)(i, j) = i + j;
+        }
+
+    Timer tm;
+    tm.Start();
+    cMat3->Add(cMat, cMat2);
+    tm.End();
+    std::cout << "Sequenced: \n";
+    std::cout << tm;
+
+    cMat->SetExecutionPolicy(NS_Matrix::MatrixExecutionPolicy::PARALLEL_POLICY);
+    cMat2->SetExecutionPolicy(NS_Matrix::MatrixExecutionPolicy::PARALLEL_POLICY);
+    cMat3->SetExecutionPolicy(NS_Matrix::MatrixExecutionPolicy::PARALLEL_POLICY);
+    for (int i = 0; i < 10000; ++i)
+        for (int j = 0; j < 10000; ++j)
+        {
+            (*cMat)(i, j) = i * j;
+            (*cMat2)(i, j) = i + j;
+        }
+    tm.Start();
+    cMat3->Add(cMat, cMat2);
+    tm.End();
+    std::cout << "Parralel: \n";
+    std::cout << tm;
+
+    cMat->SetExecutionPolicy(NS_Matrix::MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY);
+    cMat2->SetExecutionPolicy(NS_Matrix::MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY);
+    cMat3->SetExecutionPolicy(NS_Matrix::MatrixExecutionPolicy::PARALLEL_UNSEQUENCED_POLICY);
+    for (int i = 0; i < 10000; ++i)
+        for (int j = 0; j < 10000; ++j)
+        {
+            (*cMat)(i, j) = i * j;
+            (*cMat2)(i, j) = i + j;
+        }
+    tm.Start();
+    cMat3->Add(cMat, cMat2);
+    tm.End();
+    std::cout << "Parralel unsequenced: \n";
+    std::cout << tm;
+
+
+    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>(*cMat);
+    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat2 = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>(*cMat2);
+    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat3 = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>();
+
+    tm.Start();
+    *gMat3 = *gMat + *gMat2;
+    tm.End();
+    std::cout << "GPU : \n";
+    std::cout << tm;
+}
+
+void CUAdditor::RunMatrixTests4()
+{
+    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>();
+    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat2 = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>();
+    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat3 = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>();
+
+    for (int i = 0; i < 10000; ++i)
+        for (int j = 0; j < 10000; ++j)
+        {
+            (*gMat)(i, j) = i * j;
+            (*gMat2)(i, j) = i + j;
+        }
+
+    Timer tm;
+    tm.Start();
+    gMat3->Add(gMat, gMat2);
+    tm.End();
+    std::cout << "GPU : \n";
+    std::cout << tm;
 }
 
 void PrintMatrix(double *arr, size_t row, size_t col)
