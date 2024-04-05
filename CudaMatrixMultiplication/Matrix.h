@@ -102,9 +102,9 @@ namespace NS_Matrix
 		const Matrix<DeviceType::CPU, X, Y> operator+(const Matrix<DeviceType::CPU, X, Y>& other);
 		const Matrix<DeviceType::CPU, X, Y> operator+(const Matrix<DeviceType::GPU, X, Y>& other);
 		template<size_t Z>
-		const Matrix<DeviceType::CPU, X, Y> operator*(const Matrix<DeviceType::CPU, Y, Z>& other);
+		const Matrix<DeviceType::CPU, X, Z> operator*(const Matrix<DeviceType::CPU, Y, Z>& other);
 		template<size_t Z>
-		const Matrix<DeviceType::CPU, X, Y> operator*(const Matrix<DeviceType::GPU, Y, Z>& other);
+		const Matrix<DeviceType::CPU, X, Z> operator*(const Matrix<DeviceType::GPU, Y, Z>& other);
 		double* GetCArr() noexcept;
 		const double* GetConstCArr() const noexcept;
 		void SetExecutionPolicy(MatrixExecutionPolicy pol);
@@ -123,17 +123,18 @@ namespace NS_Matrix
 		template<typename ...Args>
 		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other, Args ...args);
 		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::CPU, X, Y>> other);
-		template<typename ...Args>
-		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other, Args ...args);
-		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::GPU, X, Y>> other);
+		template<size_t Z, size_t Q, typename ...Args>
+		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::GPU, X, Z>> left, const shared_ptr<Matrix<DeviceType::GPU, Z, Q>> right, Args ...args);
+		template<size_t Z>
+		void MultiplyOnSelf(const shared_ptr<Matrix<DeviceType::GPU, X, Z>> left, const shared_ptr<Matrix<DeviceType::GPU, Z, Y>> right);
 	private:
 		void InnerCopy(const Matrix<DeviceType::CPU, X, Y>* other);
 		void InnerAdd(const Matrix<DeviceType::CPU, X, Y>* other);
 		void InnerAddFromGPU(const Matrix<DeviceType::GPU, X, Y>* other);
 		template<size_t Z>
-		void InnerMultiply(const Matrix<DeviceType::CPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Y>* out);
+		void InnerMultiply(const Matrix<DeviceType::CPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Z>* out);
 		template<size_t Z>
-		void InnerMultiplyFromGPU(const Matrix<DeviceType::GPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Y>* out);
+		void InnerMultiplyFromGPU(const Matrix<DeviceType::GPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Z>* out);
 
 		
 		double arr[X * Y];
@@ -209,13 +210,13 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline Matrix<DeviceType::GPU, X, Y>::~Matrix()
 	{
-		cudaFree(arr);
+		//cudaFree(arr);
 	}
 
 	template<size_t X, size_t Y>
 	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>& other) : arr(X * Y)
 	{
-		cudaError_t error = cudaMemcpy(arr.GetPtr(), other.GetConstCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
+		cudaError_t error = cudaMemcpy(arr, other.GetConstCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
 		if (error != cudaSuccess)
 			throw std::exception("Can't copy from device matrix to host matrix.");
 	}
@@ -231,7 +232,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::CPU, X, Y>&& other) : arr(X * Y)
 	{
-		cudaError_t error = cudaMemcpy(arr.GetPtr(), other.GetCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
+		cudaError_t error = cudaMemcpy(arr, other.GetConstCArr(), X * Y * sizeof(double), cudaMemcpyHostToDevice);
 		if (error != cudaSuccess)
 			throw std::exception("Can't copy from device matrix to host matrix.");
 	}
@@ -239,7 +240,7 @@ namespace NS_Matrix
 	template<size_t X, size_t Y>
 	inline Matrix<DeviceType::GPU, X, Y>::Matrix(const Matrix<DeviceType::GPU, X, Y>&& other)
 	{
-		arr.GetPtr() = other.arr.GetPtr();
+		arr = other.arr;
 		other.arr.GetPtr() = nullptr;
 
 		return *this;
@@ -281,7 +282,6 @@ namespace NS_Matrix
 	inline const Matrix<DeviceType::GPU, X, Y>& Matrix<DeviceType::GPU, X, Y>::operator=(const Matrix<DeviceType::GPU, X, Y>& other)
 	{
 		cudaError_t error = CopyMatrix(arr, other.arr, X * Y);
-		error = CopyMatrix(arr, other.arr, X * Y);
 		if (error != cudaSuccess)
 			throw std::exception("Can't copy from device matrix to host matrix.");
 		return *this;
@@ -657,18 +657,17 @@ namespace NS_Matrix
 
 	template<size_t X, size_t Y>
 	template<size_t Z>
-	void Matrix<DeviceType::CPU, X, Y>::InnerMultiply(const Matrix<DeviceType::CPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Y>* out)
+	void Matrix<DeviceType::CPU, X, Y>::InnerMultiply(const Matrix<DeviceType::CPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Z>* out)
 	{
 		auto multiplyLambda = [&](double& el)
 			{
 				size_t row = (out->GetCArr() - &el) / Y;
 				size_t column = (out->GetCArr() - &el) / sizeof(double);
 
-				for (int i = 0; i < Z; ++i)
-					for (int j = 0; j < Y; ++j)
-					{
-						out->GetCArr()[row * Z + column] += arr[row * Y + j] * (other->GetConstCArr()[j * Z + i]);
-					}
+				for (int j = 0; j < Y; ++j)
+				{
+					out->GetCArr()[row * Z + column] += arr[row * Y + j] * (other->GetConstCArr()[j * Z + column]);
+				}
 			};
 
 		switch (m_policy)
@@ -683,12 +682,22 @@ namespace NS_Matrix
 
 	template<size_t X, size_t Y>
 	template<size_t Z>
-	void Matrix<DeviceType::CPU, X, Y>::InnerMultiplyFromGPU(const Matrix<DeviceType::GPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Y>* out)
+	void Matrix<DeviceType::CPU, X, Y>::InnerMultiplyFromGPU(const Matrix<DeviceType::GPU, Y, Z>* other, Matrix<DeviceType::CPU, X, Z>* out)
 	{
 		//Allocate memory on device
+		DeviceMemoryAllocator<double> tempOut(X * Z);
+		DeviceMemoryAllocator<double> tempThis(X * Y);
 		//Move data to device
+		cudaError_t err = cudaMemcpy(tempThis, arr, cudaMemcpyHostToDevice);
+		if (err != cudaSuccess)
+			exception("Can't copy data to device!");
 		//Multiply
+		err = MatrixMultiply(tempThis, other.GetConstCArr(), tempOut, X, Y, Z);
+		if (err != cudaSuccess)
+			exception("Can't Multiply 2 matricies");
 		//move data to OUT
-		//free alocated memory on device.
+		cudaError_t err = cudaMemcpy(out, tempOut, cudaMemcpyDeviceToHost);
+		if (err != cudaSuccess)
+			exception("Can't copy data from device!");
 	}
 }

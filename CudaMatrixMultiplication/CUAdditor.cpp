@@ -258,16 +258,18 @@ void CUAdditor::RunMatrixTests3()
 
 void CUAdditor::RunMatrixTests4()
 {
-    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>();
-    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat2 = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>();
-    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat3 = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>();
+    std::shared_ptr<Matrix<DeviceType::CPU, 10000, 10000>> cMat = std::make_shared<Matrix<DeviceType::CPU, 10000, 10000 >>();
+    std::shared_ptr<Matrix<DeviceType::CPU, 10000, 10000>> cMat2 = std::make_shared<Matrix<DeviceType::CPU, 10000, 10000 >>();
 
     for (int i = 0; i < 10000; ++i)
         for (int j = 0; j < 10000; ++j)
         {
-            (*gMat)(i, j) = i * j;
-            (*gMat2)(i, j) = i + j;
+            (*cMat)(i, j) = i * j;
+            (*cMat2)(i, j) = i + j;
         }
+    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>(*cMat);
+    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat2 = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>(*cMat2);
+    std::shared_ptr<Matrix<DeviceType::GPU, 10000, 10000>> gMat3 = std::make_shared<Matrix<DeviceType::GPU, 10000, 10000 >>();
 
     Timer tm;
     tm.Start();
@@ -275,6 +277,22 @@ void CUAdditor::RunMatrixTests4()
     tm.End();
     std::cout << "GPU : \n";
     std::cout << tm;
+}
+
+void CUAdditor::RunMatrixTests5()
+{
+    std::shared_ptr<Matrix<DeviceType::CPU, 10000, 10000>> cMat = std::make_shared<Matrix<DeviceType::CPU, 10000, 10000 >>();
+    std::shared_ptr<Matrix<DeviceType::CPU, 10000, 10000>> cMat2 = std::make_shared<Matrix<DeviceType::CPU, 10000, 10000 >>();
+
+    for (int i = 0; i < 10000; ++i)
+        for (int j = 0; j < 10000; ++j)
+        {
+            (*cMat)(i, j) = i * j;
+            (*cMat2)(i, j) = i + j;
+        }
+
+    std::shared_ptr<Matrix<DeviceType::CPU, 10000, 10000>> cMat3 = std::make_shared<Matrix<DeviceType::CPU, 10000, 10000 >>();
+    cMat3->MultiplyOnSelf(cMat, cMat2);
 }
 
 void PrintMatrix(double *arr, size_t row, size_t col)

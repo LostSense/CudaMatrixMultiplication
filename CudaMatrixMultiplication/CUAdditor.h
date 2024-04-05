@@ -11,5 +11,6 @@ public:
 	void RunMatrixTests2();
 	void RunMatrixTests3();
 	void RunMatrixTests4();
+	void RunMatrixTests5();
 };
 

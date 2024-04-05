@@ -11,6 +11,7 @@ int main(int argc, char** argv)
 	obj.RunMatrixTests1();
 	//obj.RunMatrixTests2();
 	obj.RunMatrixTests3();
+	obj.RunMatrixTests4();
 
 	return 0;
 }
